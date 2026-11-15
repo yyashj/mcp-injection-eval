@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check src tests
+      - run: PYTHONPATH=src python -m pytest -q
+      - name: Run benchmark (scripted agents)
+        run: PYTHONPATH=src python -m mcpinj.runner --agents naive,guarded --out ci-results
+      - name: Fail if results drift from the committed table
+        run: diff <(python -c "import json;print(json.dumps(json.load(open('results/summary.json')),indent=2,sort_keys=True))") <(python -c "import json;print(json.dumps(json.load(open('ci-results/summary.json')),indent=2,sort_keys=True))")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.python-version }}
+          path: ci-results/
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reproduce results in Docker
+        run: HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build --abort-on-container-exit --exit-code-from eval eval
