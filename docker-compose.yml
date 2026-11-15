@@ -1,0 +1,37 @@
+services:
+  # Deterministic eval of the scripted agents. No network at all: every tool is
+  # mocked, so nothing an injected instruction does can leave the container.
+  eval:
+    build:
+      context: .
+      network: host        # only the image build (pip install) needs network
+    image: mcp-injection-eval:latest
+    network_mode: none
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"   # so results/ on the host stays writable
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    volumes:
+      - ./results:/app/results
+    command: ["sh", "-c", "python -m pytest -q -p no:cacheprovider && python -m mcpinj.runner --agents naive,guarded --out /app/results"]
+
+  # Optional: evaluate a real model behind any OpenAI-compatible endpoint.
+  #   OPENAI_API_KEY=... docker compose --profile llm up llm
+  llm:
+    profiles: [llm]
+    image: mcp-injection-eval:latest
+    build:
+      context: .
+      network: host
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    environment:
+      - OPENAI_API_KEY
+      - OPENAI_BASE_URL
+      - MCPINJ_MODEL
+    volumes:
+      - ./results/llm:/app/results
+    command: ["python", "-m", "mcpinj.runner", "--agents", "naive,guarded,llm", "--out", "/app/results"]
